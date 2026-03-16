@@ -30,10 +30,10 @@ MKT_API_DATE  = 'Last_Activity_Date__c'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
-# Global variable to store driver path to avoid re-downloading in threads
+# Global variable for driver path
 GLOBAL_DRIVER_PATH = None
 
-# ================= 🛠️ JAVASCRIPT LOGIC (ORIGINAL) 🛠️ =================
+# ================= 🛠️ JAVASCRIPT LOGIC =================
 JS_EXPAND_LOGIC = """
     (function() {
         function triggerClick(el) {
@@ -47,7 +47,6 @@ JS_EXPAND_LOGIC = """
                 el.dispatchEvent(new MouseEvent('click', eventOpts));
             } catch(e) { console.error(e); }
         }
-
         function queryDeep(root) {
             let foundElements = [];
             let walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
@@ -66,10 +65,8 @@ JS_EXPAND_LOGIC = """
             for (let el of all) { if (el.shadowRoot) foundElements = foundElements.concat(queryDeep(el.shadowRoot)); }
             return foundElements;
         }
-
         let targets = queryDeep(document.body);
         targets.forEach(btn => triggerClick(btn));
-        
         let others = document.body.querySelectorAll('button');
         others.forEach(btn => {
             let t = (btn.innerText || "").toLowerCase();
@@ -108,7 +105,7 @@ JS_GET_DATES = """
     return getDates(document.body);
 """
 
-# ================= HELPER FUNCTIONS =================
+# ================= HELPERS =================
 def get_india_date_str():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%d-%b-%Y')
 
@@ -117,12 +114,11 @@ def get_india_full_timestamp():
 
 def clean_activity_date(text):
     if not text: return None
-    text = text.split('|')[-1].strip()
-    text_lower = text.lower()
+    text = text.split('|')[-1].strip().lower()
     now = datetime.now()
-    if 'today' in text_lower: return now.strftime('%d-%b-%Y')
-    elif 'yesterday' in text_lower: return (now - timedelta(days=1)).strftime('%d-%b-%Y')
-    if 'overdue' in text_lower: text = text_lower.replace('overdue', '').strip().title()
+    if 'today' in text: return now.strftime('%d-%b-%Y')
+    elif 'yesterday' in text: return (now - timedelta(days=1)).strftime('%d-%b-%Y')
+    text = text.replace('overdue', '').strip().title()
     for fmt in ('%d-%b-%Y', '%d-%b'):
         try:
             dt = datetime.strptime(text, fmt)
@@ -176,7 +172,7 @@ def send_email_report(subject, html, parent_msg_id=None, csv_data=None):
         smtp.send_message(msg)
     return msg['Message-ID']
 
-# ================= WORKER FOR THREADING =================
+# ================= WORKER =================
 def process_lead_worker(lid, session_id):
     global GLOBAL_DRIVER_PATH
     options = Options()
@@ -203,26 +199,34 @@ def process_lead_worker(lid, session_id):
     except Exception as e: return lid, 0, None, str(e)
     finally: driver.quit()
 
-# ================= MAIN EXECUTION =================
+# ================= MAIN =================
 def main():
     global GLOBAL_DRIVER_PATH
     try:
         sf = Salesforce(username=SF_USERNAME, password=SF_PASSWORD, security_token=SF_TOKEN)
     except Exception as e: logging.error(f"SF Connection Failed: {e}"); sys.exit(1)
 
-    logging.info("Downloading Chrome Driver...")
     GLOBAL_DRIVER_PATH = ChromeDriverManager().install()
 
     start_dt = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%dT00:00:00Z')
-    mkt_query = f"SELECT Id FROM Lead WHERE LeadSource = 'Marketing Inbound' AND Sub_Source__c != 'App Install' AND CreatedDate >= {start_dt} LIMIT 400"
+    
+    # 🛠️ Query Updated: Marketing Inbound (No App Install) OR the New List
+    mkt_query = f"""
+        SELECT Id FROM Lead 
+        WHERE (
+            (LeadSource = 'Marketing Inbound' AND Sub_Source__c != 'App Install') 
+            OR 
+            (Sub_Source__c IN ('Book Demo', 'Chat', 'CP Form', 'App Install', 'Contact us'))
+        ) 
+        AND CreatedDate >= {start_dt} 
+        LIMIT 600
+    """
     mkt_recs = [r['Id'] for r in sf.query_all(mkt_query)['records']]
     
     total_leads = len(mkt_recs)
     base_subject = f"Salesforce Daily Activity Report [{get_india_date_str()}]"
-    
-    # Starting Email Info
     start_info = [("Total Leads Found", total_leads, "N/A"), ("Parallel Workers", "4 Browsers", "N/A")]
-    thread_id = send_email_report(base_subject, create_html_body(base_subject, start_info, "Processing non-app install tasks across 4 parallel browser instances..."))
+    thread_id = send_email_report(base_subject, create_html_body(base_subject, start_info, "Processing non-app install & specific sub-sources..."))
 
     all_details = []
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -261,6 +265,6 @@ def main():
         ("Failed", stats['failed'], "Execution Errors")
     ]
     
-    send_email_report(base_subject, create_html_body("✅ Marketing Execution Complete", final_info, "Check CSV for individual details."), parent_msg_id=thread_id, csv_data=output.getvalue())
+    send_email_report(base_subject, create_html_body("✅ Marketing Execution Complete", final_info, "Individual record details are in the CSV."), parent_msg_id=thread_id, csv_data=output.getvalue())
 
 if __name__ == "__main__": main()
