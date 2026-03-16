@@ -1,0 +1,37 @@
+name: Salesforce Marketing Bot (Activity Updater)
+
+on:
+  workflow_dispatch:      # Manual run button ke liye
+  schedule:
+    - cron: '0 0 * * *'   # Rozana midnight (UTC) par chalega, aap isey change kar sakte hain
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours limit taaki browsers aram se kaam karein
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Chrome and Drivers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          pip install simple-salesforce selenium webdriver-manager
+
+      - name: Run Marketing Bot Script
+        env:
+          # Inhe GitHub Settings > Secrets mein add karna zaroori hai
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+          SF_PASSWORD: ${{ secrets.SF_PASSWORD }}
+          SF_TOKEN: ${{ secrets.SF_TOKEN }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+        run: python marketing_bot.py
