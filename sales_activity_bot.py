@@ -3,6 +3,7 @@ from email.message import EmailMessage
 from email.utils import make_msgid, formatdate
 from datetime import datetime, timedelta
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from simple_salesforce import Salesforce
 
 # Selenium Imports
@@ -28,6 +29,9 @@ BASE_URL = 'https://loop-subscriptions.lightning.force.com/lightning/r/{obj}/{id
 SALES_API_DATE = 'Last_Activity_Date_V__c'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
+
+# Global variable to store driver path to avoid re-downloading in threads
+GLOBAL_DRIVER_PATH = None
 
 # ================= 🛠️ JAVASCRIPT LOGIC (TEXT WALKER) 🛠️ =================
 JS_EXPAND_LOGIC = """
@@ -134,7 +138,7 @@ def convert_date_for_api(date_str):
     try: return datetime.strptime(date_str, '%d-%b-%Y').strftime('%Y-%m-%d')
     except: return None
 
-# ================= 🎨 2nd SCREENSHOT STYLE TEMPLATE 🎨 =================
+# ================= 🎨 HTML TEMPLATE 🎨 =================
 def create_html_body(title, data_rows, footer_note=""):
     rows_html = "".join([f"""
         <tr>
@@ -169,31 +173,50 @@ def send_email_report(subject, html, parent_msg_id=None, csv_data=None):
         smtp.send_message(msg)
     return msg['Message-ID']
 
-# ================= SCRAPING & MAIN =================
-def scrape_record(driver, rec_id, obj_type):
-    url = BASE_URL.format(obj=obj_type, id=rec_id)
-    driver.get(url)
-    time.sleep(10)
-    for _ in range(3):
-        driver.execute_script(JS_EXPAND_LOGIC)
-        time.sleep(3)
-    cutoff_y = driver.execute_script(JS_GET_CUTOFF)
-    raw_items = driver.execute_script(JS_GET_DATES)
-    valid_dates = [clean_activity_date(i['text']) for i in raw_items if (cutoff_y == 0 or i['y'] >= (cutoff_y - 10)) and clean_activity_date(i['text'])]
-    if not valid_dates: return 0, None
-    valid_dates.sort(key=lambda x: datetime.strptime(x, '%d-%b-%Y'), reverse=True)
-    return len(set(valid_dates)), valid_dates[0]
+# ================= WORKER FOR THREADING =================
+def process_account_worker(rec_id, session_id):
+    global GLOBAL_DRIVER_PATH
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+    
+    driver = webdriver.Chrome(service=Service(GLOBAL_DRIVER_PATH), options=chrome_options)
+    
+    try:
+        driver.get(f"https://loop-subscriptions.lightning.force.com/secur/frontdoor.jsp?sid={session_id}")
+        time.sleep(5)
+        url = BASE_URL.format(obj='Account', id=rec_id)
+        driver.get(url)
+        time.sleep(10)
+        for _ in range(3):
+            driver.execute_script(JS_EXPAND_LOGIC)
+            time.sleep(3)
+        cutoff_y = driver.execute_script(JS_GET_CUTOFF)
+        raw_items = driver.execute_script(JS_GET_DATES)
+        valid_dates = [clean_activity_date(i['text']) for i in raw_items if (cutoff_y == 0 or i['y'] >= (cutoff_y - 10)) and clean_activity_date(i['text'])]
+        if not valid_dates: return rec_id, None, None
+        valid_dates.sort(key=lambda x: datetime.strptime(x, '%d-%b-%Y'), reverse=True)
+        return rec_id, valid_dates[0], None
+    except Exception as e:
+        return rec_id, None, str(e)
+    finally:
+        driver.quit()
 
+# ================= MAIN EXECUTION =================
 def main():
+    global GLOBAL_DRIVER_PATH
     try:
         sf = Salesforce(username=SF_USERNAME, password=SF_PASSWORD, security_token=SF_TOKEN)
     except Exception as e:
         logging.error(f"SF Connection Failed: {e}"); sys.exit(1)
 
-    target_owners = "('Harshit Gupta', 'Abhishek Nayak', 'Deepesh Dubey', 'Prashant Jha')"
+    # 🛠️ MIHIR HARDIYA ADDED
+    target_owners = "('Harshit Gupta', 'Abhishek Nayak', 'Deepesh Dubey', 'Prashant Jha', 'Mihir Hardiya')"
     sales_recs = sf.query_all(f"SELECT Id, Owner.Name FROM Account WHERE Owner.Name IN {target_owners}")['records']
     
-    # Generate Sales Breakdown Text
     counts = Counter([r['Owner']['Name'] for r in sales_recs])
     breakdown = "".join([f"• {owner}: <b>{count}</b><br>" for owner, count in counts.items()])
     
@@ -204,37 +227,33 @@ def main():
         ("Sales Breakdown", breakdown)
     ]
     
-    thread_id = send_email_report(base_subject, create_html_body(base_subject, data, "The automation script has started. You will receive a summary upon completion."))
+    thread_id = send_email_report(base_subject, create_html_body(base_subject, data, "The automation script has started. Processing with 4 parallel browsers..."))
 
-    # --- 🛠️ 27-Jan FIXED BROWSER OPTIONS 🛠️ ---
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
-    
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    
-    driver.get(f"https://loop-subscriptions.lightning.force.com/secur/frontdoor.jsp?sid={sf.session_id}")
-    time.sleep(5)
+    # --- 🛠️ FIX: Download Driver ONLY ONCE before threading ---
+    logging.info("Downloading Chrome Driver...")
+    GLOBAL_DRIVER_PATH = ChromeDriverManager().install()
+
+    all_results = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(process_account_worker, rec['Id'], sf.session_id) for rec in sales_recs]
+        for f in futures:
+            all_results.append(f.result())
 
     stats = {'updated': 0, 'failed': 0}
     failed_log = []
 
-    for i, rec in enumerate(sales_recs):
-        try:
-            count, last_date = scrape_record(driver, rec['Id'], 'Account')
-            if last_date:
-                sf.Account.update(rec['Id'], {SALES_API_DATE: convert_date_for_api(last_date)})
+    for rid, last_date, err in all_results:
+        if last_date:
+            try:
+                sf.Account.update(rid, {SALES_API_DATE: convert_date_for_api(last_date)})
                 stats['updated'] += 1
-        except Exception as e:
+            except Exception as ue:
+                stats['failed'] += 1
+                failed_log.append(['Account', rid, str(ue)])
+        elif err:
             stats['failed'] += 1
-            failed_log.append(['Account', rec['Id'], str(e)])
+            failed_log.append(['Account', rid, str(err)])
 
-    driver.quit()
-    
-    # Final CSV Preparation for errors
     csv_str = None
     if failed_log:
         output = io.StringIO()
