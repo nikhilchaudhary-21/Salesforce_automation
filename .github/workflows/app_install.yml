@@ -1,0 +1,36 @@
+name: App Install Report Bot
+
+on:
+  workflow_dispatch:      # Manual trigger ke liye
+  schedule:
+    - cron: '30 23 * * *'   # Roz subah 05:00 AM IST (11:30 PM UTC)
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours limit
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          pip install simple-salesforce selenium webdriver-manager
+
+      - name: Run App Install Script
+        env:
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+          SF_PASSWORD: ${{ secrets.SF_PASSWORD }}
+          SF_TOKEN: ${{ secrets.SF_TOKEN }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          # Receiver is fixed in the script: nikhil.chaudhary@loopwork.co
+        run: python app_install.py
