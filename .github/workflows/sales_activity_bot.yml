@@ -1,0 +1,36 @@
+name: Sales Account Activity Bot
+
+on:
+  workflow_dispatch:      # Manual run button ke liye
+  schedule:
+    - cron: '30 1 * * *'   # Rozana subah 07:00 AM IST (01:30 AM UTC)
+
+jobs:
+  run-sales-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours limit kyunki accounts scan karne mein time lagta hai
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          pip install simple-salesforce selenium webdriver-manager
+
+      - name: Run Sales Activity Bot
+        env:
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+          SF_PASSWORD: ${{ secrets.SF_PASSWORD }}
+          SF_TOKEN: ${{ secrets.SF_TOKEN }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+        run: python sales_activity_bot.py
