@@ -206,17 +206,19 @@ def main():
         sf = Salesforce(username=SF_USERNAME, password=SF_PASSWORD, security_token=SF_TOKEN)
     except Exception as e: logging.error(f"SF Connection Failed: {e}"); sys.exit(1)
 
+    logging.info("Downloading Chrome Driver...")
     GLOBAL_DRIVER_PATH = ChromeDriverManager().install()
 
     start_dt = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%dT00:00:00Z')
     
-    # 🛠️ Query Updated: Marketing Inbound (No App Install) OR the New List
+    # 🛠️ Query Updated: Sub_Source != 'App Install' added to ALL conditions
     mkt_query = f"""
         SELECT Id FROM Lead 
-        WHERE (
-            (LeadSource = 'Marketing Inbound' AND Sub_Source__c != 'App Install') 
+        WHERE Sub_Source__c != 'App Install' 
+        AND (
+            LeadSource = 'Marketing Inbound' 
             OR 
-            (Sub_Source__c IN ('Book Demo', 'Chat', 'CP Form', 'App Install', 'Contact us'))
+            Sub_Source__c IN ('Book Demo', 'Chat', 'CP Form', 'Contact us')
         ) 
         AND CreatedDate >= {start_dt} 
         LIMIT 600
@@ -226,7 +228,7 @@ def main():
     total_leads = len(mkt_recs)
     base_subject = f"Salesforce Daily Activity Report [{get_india_date_str()}]"
     start_info = [("Total Leads Found", total_leads, "N/A"), ("Parallel Workers", "4 Browsers", "N/A")]
-    thread_id = send_email_report(base_subject, create_html_body(base_subject, start_info, "Processing non-app install & specific sub-sources..."))
+    thread_id = send_email_report(base_subject, create_html_body(base_subject, start_info, "Processing non-app install leads..."))
 
     all_details = []
     with ThreadPoolExecutor(max_workers=4) as executor:
