@@ -161,12 +161,26 @@ def create_html_body(title, data_rows, footer_note=""):
     </html>"""
 
 def send_email_report(subject, html, parent_msg_id=None, csv_data=None):
-    if not EMAIL_SENDER: return None
+    if not EMAIL_SENDER or not EMAIL_RECEIVER: return None
+    
     msg = EmailMessage()
-    msg['From'], msg['To'], msg['Subject'], msg['Date'] = EMAIL_SENDER, EMAIL_RECEIVER, subject, formatdate(localtime=True)
+    
+    # Handling multiple recipients
+    recipients = [email.strip() for email in EMAIL_RECEIVER.split(',')]
+    
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = ", ".join(recipients)
+    msg['Subject'] = subject
+    msg['Date'] = formatdate(localtime=True)
+    
     msg.add_alternative(html, subtype='html')
-    if csv_data: msg.add_attachment(csv_data.encode('utf-8'), maintype='text', subtype='csv', filename='mkt_report_details.csv')
-    if parent_msg_id: msg['In-Reply-To'] = msg['References'] = parent_msg_id
+    
+    if csv_data: 
+        msg.add_attachment(csv_data.encode('utf-8'), maintype='text', subtype='csv', filename='mkt_report_details.csv')
+    
+    if parent_msg_id: 
+        msg['In-Reply-To'] = msg['References'] = parent_msg_id
+        
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
@@ -211,7 +225,6 @@ def main():
 
     start_dt = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%dT00:00:00Z')
     
-    # 🛠️ Query Updated: Sub_Source != 'App Install' added to ALL conditions
     mkt_query = f"""
         SELECT Id FROM Lead 
         WHERE Sub_Source__c != 'App Install' 
