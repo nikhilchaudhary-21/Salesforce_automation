@@ -1,9 +1,9 @@
 name: App Install Report Bot
 
 on:
-  workflow_dispatch:      # Manual trigger ke liye
+  workflow_dispatch:      
   schedule:
-    - cron: '30 23 * * *'   # Roz subah 05:00 AM IST (11:30 PM UTC)
+    - cron: '30 23 * * *'   
 
 jobs:
   run-report:
@@ -32,5 +32,5 @@ jobs:
           SF_TOKEN: ${{ secrets.SF_TOKEN }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          # Receiver is fixed in the script: nikhil.chaudhary@loopwork.co
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }} 
         run: python app_install.py
