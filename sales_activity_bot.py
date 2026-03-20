@@ -30,7 +30,6 @@ SALES_API_DATE = 'Last_Activity_Date_V__c'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
-# Global variable to store driver path to avoid re-downloading in threads
 GLOBAL_DRIVER_PATH = None
 
 # ================= 🛠️ JAVASCRIPT LOGIC (TEXT WALKER) 🛠️ =================
@@ -162,12 +161,26 @@ def create_html_body(title, data_rows, footer_note=""):
     </html>"""
 
 def send_email_report(subject, html, parent_msg_id=None, csv_data=None):
-    if not EMAIL_SENDER: return None
+    if not EMAIL_SENDER or not EMAIL_RECEIVER: return None
+    
     msg = EmailMessage()
-    msg['From'], msg['To'], msg['Subject'], msg['Date'] = EMAIL_SENDER, EMAIL_RECEIVER, subject, formatdate(localtime=True)
+    
+    # Logic for multiple recipients
+    recipients = [email.strip() for email in EMAIL_RECEIVER.split(',')]
+    
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = ", ".join(recipients)
+    msg['Subject'] = subject
+    msg['Date'] = formatdate(localtime=True)
+    
     msg.add_alternative(html, subtype='html')
-    if csv_data: msg.add_attachment(csv_data.encode('utf-8'), maintype='text', subtype='csv', filename='sales_errors.csv')
-    if parent_msg_id: msg['In-Reply-To'] = msg['References'] = parent_msg_id
+    
+    if csv_data: 
+        msg.add_attachment(csv_data.encode('utf-8'), maintype='text', subtype='csv', filename='sales_errors.csv')
+    
+    if parent_msg_id: 
+        msg['In-Reply-To'] = msg['References'] = parent_msg_id
+        
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
@@ -213,7 +226,6 @@ def main():
     except Exception as e:
         logging.error(f"SF Connection Failed: {e}"); sys.exit(1)
 
-    # 🛠️ MIHIR HARDIYA ADDED
     target_owners = "('Harshit Gupta', 'Abhishek Nayak', 'Deepesh Dubey', 'Prashant Jha', 'Mihir Hardiya')"
     sales_recs = sf.query_all(f"SELECT Id, Owner.Name FROM Account WHERE Owner.Name IN {target_owners}")['records']
     
@@ -229,7 +241,6 @@ def main():
     
     thread_id = send_email_report(base_subject, create_html_body(base_subject, data, "The automation script has started. Processing with 4 parallel browsers..."))
 
-    # --- 🛠️ FIX: Download Driver ONLY ONCE before threading ---
     logging.info("Downloading Chrome Driver...")
     GLOBAL_DRIVER_PATH = ChromeDriverManager().install()
 
