@@ -16,9 +16,11 @@ SF_USERNAME = os.getenv('SF_USERNAME')
 SF_PASSWORD = os.getenv('SF_PASSWORD')
 SF_TOKEN    = os.getenv('SF_TOKEN')
 
+# Email Config
 EMAIL_SENDER   = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
-EMAIL_RECEIVER = 'nikhil.chaudhary@loopwork.co' 
+# .env se uthayega, comma separated list bhi chalegi
+EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', 'nikhil.chaudhary@loopwork.co')
 
 BASE_URL = 'https://loop-subscriptions.lightning.force.com/lightning/r/{obj}/{id}/view'
 
@@ -95,12 +97,26 @@ def create_html_body(title, data_rows, footer_note=""):
     return f"""<html><body style="font-family:'Segoe UI',Arial;background:#f9f9f9;padding:20px;"><div style="max-width:600px;margin:auto;background:#fff;padding:30px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.1);"><h2 style="color:#2c3e50;border-bottom:2px solid #3498db;padding-bottom:10px;">📊 {title}</h2><p style="font-size:14px;color:#7f8c8d;">{get_india_full_timestamp()}</p><table style="width:100%;border-collapse:collapse;">{rows_html}</table><p style="margin-top:25px;font-style:italic;color:#7f8c8d;font-size:13px;">{footer_note}</p><div style="margin-top:30px;border-top:1px solid #eee;padding-top:15px;font-size:12px;color:#999;text-align:center;">Automated by <b>Nikhil Chaudhary</b> ⚡</div></div></body></html>"""
 
 def send_email_report(subject, html, parent_msg_id=None, csv_data=None):
-    if not EMAIL_SENDER: return None
+    if not EMAIL_SENDER or not EMAIL_RECEIVER: return None
+    
     msg = EmailMessage()
-    msg['From'], msg['To'], msg['Subject'], msg['Date'] = EMAIL_SENDER, EMAIL_RECEIVER, subject, formatdate(localtime=True)
+    
+    # Multiple recipients handle karne ke liye logic
+    recipient_list = [email.strip() for email in EMAIL_RECEIVER.split(',')]
+    
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = ", ".join(recipient_list)
+    msg['Subject'] = subject
+    msg['Date'] = formatdate(localtime=True)
+    
     msg.add_alternative(html, subtype='html')
-    if csv_data: msg.add_attachment(csv_data.encode('utf-8'), maintype='text', subtype='csv', filename=f'App_Install_Report_{datetime.now().strftime("%m_%d_%Y")}.csv')
-    if parent_msg_id: msg['In-Reply-To'] = msg['References'] = parent_msg_id
+    
+    if csv_data: 
+        msg.add_attachment(csv_data.encode('utf-8'), maintype='text', subtype='csv', filename=f'App_Install_Report_{datetime.now().strftime("%m_%d_%Y")}.csv')
+    
+    if parent_msg_id: 
+        msg['In-Reply-To'] = msg['References'] = parent_msg_id
+        
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
@@ -149,7 +165,7 @@ def main():
     logging.info("Initializing WebDriver...")
     GLOBAL_DRIVER_PATH = ChromeDriverManager().install()
 
-    # 🛠️ QUERY FIX: Only App Install leads (Matches your 830 count)
+    # 🛠️ QUERY FIX: Only App Install leads
     query = "SELECT Id, Email FROM Lead WHERE Sub_Source__c = 'App Install' AND CreatedDate >= LAST_N_DAYS:30 LIMIT 1000"
     recs = sf.query_all(query)['records']
     
