@@ -19,7 +19,6 @@ SF_TOKEN    = os.getenv('SF_TOKEN')
 # Email Config
 EMAIL_SENDER   = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
-# .env se uthayega, comma separated list bhi chalegi
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', 'nikhil.chaudhary@loopwork.co')
 
 BASE_URL = 'https://loop-subscriptions.lightning.force.com/lightning/r/{obj}/{id}/view'
@@ -101,7 +100,6 @@ def send_email_report(subject, html, parent_msg_id=None, csv_data=None):
     
     msg = EmailMessage()
     
-    # Multiple recipients handle karne ke liye logic
     recipient_list = [email.strip() for email in EMAIL_RECEIVER.split(',')]
     
     msg['From'] = EMAIL_SENDER
